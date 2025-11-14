@@ -11,6 +11,7 @@ from datetime import datetime
 import io
 import base64
 import torch
+import json
 import torchvision
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
@@ -282,52 +283,74 @@ st.markdown("""
 
 @st.cache_resource
 def load_model():
-    """Load YOLO and Faster R-CNN models"""
+    """Load detection and validation models"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    try:
-        # Load YOLO Detection model
-        yolo_path = "C:/Users/anish/OneDrive/Desktop/FYP/fyp-palm/runs/detect/YOLO_Detection/weights/best.pt"
-        yolo_model = YOLO(yolo_path)
-        
-        # Load Faster R-CNN model (proper PyTorch model, not YOLO)
-        frcnn_path = "C:/Users/anish/OneDrive/Desktop/FYP/fyp-palm/runs/detect/FasterRCNN_ResNet50_Optimized/weights/best.pt"
-        
-        # Create Faster R-CNN model
-        frcnn_model = fasterrcnn_resnet50_fpn(weights=None)
-        in_features = frcnn_model.roi_heads.box_predictor.cls_score.in_features
-        frcnn_model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 3)  # 3 classes
-        
-        # Load weights
-        frcnn_checkpoint = torch.load(frcnn_path, map_location=device)
-        frcnn_model.load_state_dict(frcnn_checkpoint)
-        frcnn_model.to(device)
-        frcnn_model.eval()
-        
-        return yolo_model, frcnn_model, f"YOLO: {yolo_path}\nFaster R-CNN: {frcnn_path}"
-    except:
+    # Try multiple paths for flexibility (local and deployed)
+    possible_yolo_paths = [
+        "C:/Users/anish/OneDrive/Desktop/FYP/fyp-palm/runs/detect/YOLO_Detection/weights/best.pt",
+        "runs/detect/YOLO_Detection/weights/best.pt",
+        "models/yolo_best.pt",
+        "yolo_best.pt"
+    ]
+    
+    possible_frcnn_paths = [
+        "C:/Users/anish/OneDrive/Desktop/FYP/fyp-palm/runs/detect/FasterRCNN_ResNet50_Optimized/weights/best.pt",
+        "runs/detect/FasterRCNN_ResNet50_Optimized/weights/best.pt",
+        "models/frcnn_best.pt",
+        "frcnn_best.pt"
+    ]
+    
+    yolo_model = None
+    frcnn_model = None
+    yolo_path = None
+    frcnn_path = None
+    
+    # Try to load YOLO model
+    for path in possible_yolo_paths:
         try:
-            # Fallback to original locations
-            yolo_path = "runs/detect/YOLO_Detection/weights/best.pt"
-            yolo_model = YOLO(yolo_path)
-            
-            frcnn_path = "runs/detect/FasterRCNN_ResNet50_Optimized/weights/best.pt"
-            
-            # Create Faster R-CNN model
-            frcnn_model = fasterrcnn_resnet50_fpn(weights=None)
-            in_features = frcnn_model.roi_heads.box_predictor.cls_score.in_features
-            frcnn_model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 3)  # 3 classes
-            
-            # Load weights
-            frcnn_checkpoint = torch.load(frcnn_path, map_location=device)
-            frcnn_model.load_state_dict(frcnn_checkpoint)
-            frcnn_model.to(device)
-            frcnn_model.eval()
-            
-            return yolo_model, frcnn_model, f"YOLO: {yolo_path}\nFaster R-CNN: {frcnn_path}"
+            if os.path.exists(path):
+                yolo_model = YOLO(path)
+                yolo_path = path
+                break
         except Exception as e:
-            st.error(f"❌ Error loading models: {e}")
-            return None, None, None
+            continue
+    
+    # Try to load Faster R-CNN model
+    for path in possible_frcnn_paths:
+        try:
+            if os.path.exists(path):
+                frcnn_model = fasterrcnn_resnet50_fpn(weights=None)
+                in_features = frcnn_model.roi_heads.box_predictor.cls_score.in_features
+                frcnn_model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 3)
+                
+                frcnn_checkpoint = torch.load(path, map_location=device)
+                frcnn_model.load_state_dict(frcnn_checkpoint)
+                frcnn_model.to(device)
+                frcnn_model.eval()
+                frcnn_path = path
+                break
+        except Exception as e:
+            continue
+    
+    if yolo_model is None or frcnn_model is None:
+        missing = []
+        if yolo_model is None:
+            missing.append("YOLO Detection model")
+        if frcnn_model is None:
+            missing.append("Faster R-CNN model")
+        
+        st.error(f"❌ Missing models: {', '.join(missing)}")
+        st.info("""
+        📌 **For deployment**: Upload model files to the repository:
+        - `models/yolo_best.pt` (YOLO model)
+        - `models/frcnn_best.pt` (Faster R-CNN model)
+        
+        Or use Git LFS for large files.
+        """)
+        return None, None, None
+    
+    return yolo_model, frcnn_model, f"Detection Model: {yolo_path}\nValidation Model: {frcnn_path}"
 
 def enhance_palm_visibility(image):
     """Enhanced image processing for better palm detection in aerial images"""
@@ -350,10 +373,19 @@ def enhance_palm_visibility(image):
                       [-1,-1,-1]])
     sharpened = cv2.filter2D(enhanced, -1, kernel)
     
-    # 4. Enhance green vegetation (palms)
+    # 4. Enhance vegetation (palms) - including yellow/unhealthy palms
     hsv = cv2.cvtColor(sharpened, cv2.COLOR_BGR2HSV)
+    
+    # Boost saturation to make yellow palms more visible
+    hsv[:,:,1] = cv2.add(hsv[:,:,1], 40)  # Increase saturation globally
+    
+    # Enhance green vegetation (healthy palms)
     mask_green = cv2.inRange(hsv, (35, 40, 40), (85, 255, 255))
     hsv[:,:,1] = cv2.add(hsv[:,:,1], cv2.bitwise_and(np.full_like(hsv[:,:,1], 30), mask_green))
+    
+    # Enhance yellow vegetation (unhealthy palms) - expanded range to catch yellowing palms
+    mask_yellow = cv2.inRange(hsv, (15, 40, 40), (35, 255, 255))  # Yellow hue range
+    hsv[:,:,1] = cv2.add(hsv[:,:,1], cv2.bitwise_and(np.full_like(hsv[:,:,1], 50), mask_yellow))
     
     final_enhanced = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     
@@ -542,6 +574,68 @@ def tile_based_detection(model, image, confidence_threshold=0.1, tile_size=256, 
     
     return all_detections
 
+def merge_overlapping_boxes(detections, overlap_threshold=0.5):
+    """
+    Remove boxes where TOTAL combined overlap from ALL other boxes >= threshold.
+    
+    Example: If box A overlaps 30% with box B and 25% with box C,
+    total overlap = 55%, so box A is removed if threshold is 50%.
+    
+    Args:
+        detections: List of detections with 'bbox' and 'conf'
+        overlap_threshold: Remove box if total overlap >= this (default 0.5 = 50%)
+    """
+    if not detections or len(detections) <= 1:
+        return detections
+    
+    import torch
+    
+    # Convert to tensors
+    boxes = torch.tensor([d['bbox'] for d in detections], dtype=torch.float32)
+    scores = torch.tensor([d['conf'] for d in detections], dtype=torch.float32)
+    
+    def calculate_intersection_area(box1, box2):
+        """Calculate intersection area between two boxes"""
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        
+        return max(0, x2 - x1) * max(0, y2 - y1)
+    
+    def get_box_area(box):
+        """Calculate box area"""
+        return (box[2] - box[0]) * (box[3] - box[1])
+    
+    # Sort by confidence (highest first) - keep higher confidence boxes
+    sorted_indices = torch.argsort(scores, descending=True)
+    
+    keep = []
+    
+    for idx in sorted_indices:
+        box_i = boxes[idx]
+        area_i = get_box_area(box_i)
+        
+        # Calculate TOTAL overlap from ALL boxes we're already keeping
+        total_overlap_area = 0.0
+        
+        for kept_idx in keep:
+            box_j = boxes[kept_idx]
+            intersection = calculate_intersection_area(box_i, box_j)
+            total_overlap_area += intersection
+        
+        # Calculate what percentage of current box is covered by other boxes
+        overlap_percentage = total_overlap_area / area_i if area_i > 0 else 0.0
+        
+        # Only keep if total overlap is below threshold
+        if overlap_percentage < overlap_threshold:
+            keep.append(idx.item())
+    
+    # Return kept detections in original order
+    keep = sorted(keep)
+    merged = [detections[i] for i in keep]
+    return merged
+
 def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
     """
     Merge overlapping detections from tiled approach
@@ -667,18 +761,25 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
             })
     
     progress_bar.progress(60)
-    st.info(f"🌴 Detected {len(detections)} palm tree(s)")
 
     # If a validation model is provided, validate detections
     if validation_model is not None and detections:
-        status_text.text("✓ Step 2/2: Validating detections with Faster R-CNN...")
+        status_text.text("✓ Step 2/2: Validating detections...")
         progress_bar.progress(70)
         
         validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
         detections = validated
         
+        progress_bar.progress(85)
+    
+    # MERGE OVERLAPPING BOXES - Remove boxes where 50%+ of area is covered by other boxes combined
+    if detections and len(detections) > 1:
+        status_text.text("🔄 Removing duplicate detections...")
         progress_bar.progress(90)
-        st.success(f"✅ Validated {len(detections)} palm tree(s)")
+        
+        before_merge = len(detections)
+        detections = merge_overlapping_boxes(detections, overlap_threshold=0.5)
+        after_merge = len(detections)
     
     progress_bar.progress(100)
     status_text.empty()
@@ -707,151 +808,96 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
     return final_results
 
 
-def validate_with_faster_rcnn_2batch(detections, image, faster_rcnn_model, conf_threshold=0.15):
+def validate_with_faster_rcnn_2batch(detections, image, faster_rcnn_model, conf_threshold=0.10):
     """
-    FAST: Validate YOLO detections with Faster R-CNN in 2 batches
-    - Split detections into 2 batches
-    - Process each batch quickly
-    - Keep only individual tree crown detections (automatic validation)
-    - BALANCED: Lower threshold (0.15), balanced validation criteria
+    ACCEPT ALL INITIAL DETECTIONS - Use validation model only for classification, not rejection
+    - Filters out elongated rectangles (aspect ratio > 1.5)
+    - Uses validation model to reclassify health status only
+    - Does NOT reject any detections based on validation model confidence
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     validated_detections = []
     
-    # Split into high confidence (keep) and low confidence (validate)
-    # BALANCED: Medium threshold for high confidence
-    high_conf = []
-    low_conf = []
-
+    # Filter out invalid elongated rectangles only
+    valid_detections = []
+    
     for detection in detections:
-        if detection['conf'] > 0.5:  # Balanced threshold
-            high_conf.append(detection)
-        else:
-            low_conf.append(detection)
-
-    # Keep high confidence detections immediately
-    validated_detections.extend(high_conf)
-
-    # If nothing to validate, return early
-    if len(low_conf) == 0:
-        return validated_detections
-
-    # Split low confidence into 2 batches
-    mid_point = len(low_conf) // 2
-    batch1 = low_conf[:mid_point] if mid_point > 0 else []
-    batch2 = low_conf[mid_point:] if mid_point < len(low_conf) else []
-
-    def process_batch(batch_items, batch_tensors):
-        """Run Faster R-CNN on a batch of crop tensors and return validated detections."""
-        results_for_batch = []
+        # Filter out invalid elongated rectangles (too long horizontally or vertically)
+        bbox = detection['bbox']
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
         
-        if len(batch_tensors) == 0:
-            return results_for_batch
-
-        # Faster R-CNN expects a list of tensors (C,H,W) with values in [0,1]
-        with torch.no_grad():
-            frcnn_preds = faster_rcnn_model(batch_tensors)
-
-        for detection, frcnn_pred in zip(batch_items, frcnn_preds):
-            # Basic sanity
-            if 'boxes' not in frcnn_pred or len(frcnn_pred['boxes']) == 0:
-                continue
-
-            scores = frcnn_pred['scores'].cpu().numpy()
-            boxes = frcnn_pred['boxes'].cpu().numpy()
-            labels = frcnn_pred['labels'].cpu().numpy() if 'labels' in frcnn_pred else None
-
-            # Find top prediction
-            top_idx = int(scores.argmax())
-            top_score = float(scores[top_idx])
-            top_box = boxes[top_idx]
-
-            # Compute area ratio of predicted box relative to crop
-            x1, y1, x2, y2 = top_box
-            box_area = max(0.0, (x2 - x1) * (y2 - y1))
-            crop_w, crop_h = detection.get('crop_size', (x2 - x1, y2 - y1))
-            # If crop_size not provided, estimate from bbox
-            if crop_w is None or crop_h is None:
-                crop_w = max(1.0, x2 - x1)
-                crop_h = max(1.0, y2 - y1)
-
-            crop_area = max(1.0, crop_w * crop_h)
-            area_ratio = box_area / crop_area
-
-            # Compute center distance (normalized) to prefer centered single-object predictions
-            crop_center_x = crop_w / 2.0
-            crop_center_y = crop_h / 2.0
-            box_center_x = (x1 + x2) / 2.0
-            box_center_y = (y1 + y2) / 2.0
-            center_dist = np.sqrt((box_center_x - crop_center_x) ** 2 + (box_center_y - crop_center_y) ** 2)
-            max_dist = max(crop_w, crop_h) / 2.0
-            norm_center_dist = center_dist / (max_dist + 1e-6)
-
-            # Validation criteria for an "individual tree crown":
-            # BALANCED: More lenient criteria to detect more palms while filtering obvious issues
-            # - top_score above conf_threshold (0.15 allows more detections)
-            # - predicted box occupies a reasonable portion of crop (10-95% for flexibility)
-            # - predicted box is reasonably centered (distance <= 0.5 for more tolerance)
-            is_valid = False
-            
-            # Primary criteria - BALANCED
-            if top_score >= conf_threshold and 0.10 <= area_ratio <= 0.95 and norm_center_dist <= 0.5:
-                is_valid = True
-
-            # Relaxed criteria: if model predicts exactly 1 box with decent confidence
-            # BALANCED: Accept single predictions with moderate confidence
-            if len(scores) == 1 and top_score >= 0.4 and 0.05 <= area_ratio <= 0.98:
-                is_valid = True
-
-            if not is_valid:
-                continue
-
-            # Update detection with validated info
-            detection['cls'] = int(labels[top_idx] - 1) if labels is not None else detection.get('cls', 0)
-            detection['conf'] = top_score
-            results_for_batch.append(detection)
-
-        return results_for_batch
-
-    # Helper to build crop tensors and preserve crop size
-    def build_batch_from_items(batch_list):
-        tensors = []
-        items = []
-        for detection in batch_list:
+        # Calculate aspect ratio (should be roughly square for palm trees)
+        if width > 0 and height > 0:
+            aspect_ratio = max(width, height) / min(width, height)
+            # Reject boxes that are too elongated (aspect ratio > 1.5)
+            # Palm trees should be roughly circular/square from aerial view
+            if aspect_ratio > 1.5:  # VERY STRICT: 1.5 to filter rectangles
+                continue  # Skip this detection
+        
+        valid_detections.append(detection)
+    
+    # If no Faster R-CNN model, return all valid detections as-is
+    if faster_rcnn_model is None:
+        return valid_detections
+    
+    # Process all valid detections with Faster R-CNN for classification
+    # Split into batches for memory efficiency
+    batch_size = 32
+    all_classified = []
+    
+    for batch_start in range(0, len(valid_detections), batch_size):
+        batch_end = min(batch_start + batch_size, len(valid_detections))
+        batch = valid_detections[batch_start:batch_end]
+        
+        batch_tensors = []
+        batch_items = []
+        
+        for detection in batch:
             bbox = detection['bbox']
             x1 = max(0, int(bbox[0]))
             y1 = max(0, int(bbox[1]))
             x2 = min(image.width, int(bbox[2]))
             y2 = min(image.height, int(bbox[3]))
-
+            
             if x2 - x1 < 5 or y2 - y1 < 5:
+                # Keep detection with original classification if crop too small
+                all_classified.append(detection)
                 continue
-
+            
             crop = image.crop((x1, y1, x2, y2))
-            # BALANCED: Medium crop size (224x224) for good balance of speed and accuracy
             target_size = 224
             crop_resized = crop.resize((target_size, target_size), Image.BILINEAR)
             crop_tensor = TF.to_tensor(crop_resized).to(device)
+            
+            batch_tensors.append(crop_tensor)
+            batch_items.append(detection)
+        
+        # Run Faster R-CNN on batch
+        if len(batch_tensors) > 0:
+            with torch.no_grad():
+                frcnn_preds = faster_rcnn_model(batch_tensors)
+            
+            # Update classifications based on Faster R-CNN
+            for detection, frcnn_pred in zip(batch_items, frcnn_preds):
+                if 'boxes' in frcnn_pred and len(frcnn_pred['boxes']) > 0:
+                    scores = frcnn_pred['scores'].cpu().numpy()
+                    labels = frcnn_pred['labels'].cpu().numpy() if 'labels' in frcnn_pred else None
+                    
+                    # Get top prediction
+                    top_idx = int(scores.argmax())
+                    top_score = float(scores[top_idx])
+                    
+                    # Update classification from Faster R-CNN
+                    if labels is not None:
+                        detection['cls'] = int(labels[top_idx] - 1)  # Convert to 0/1 (Unhealthy/Healthy)
+                    detection['conf'] = max(detection['conf'], top_score)  # Use higher confidence
+                
+                # ALWAYS keep the detection regardless of Faster R-CNN result
+                all_classified.append(detection)
+    
+    return all_classified
 
-            # Attach crop size for area computations
-            detection['crop_size'] = (target_size, target_size)
-
-            tensors.append(crop_tensor)
-            items.append(detection)
-
-        return items, tensors
-
-    # Build and process batch1
-    if len(batch1) > 0:
-        batch1_items, batch1_tensors = build_batch_from_items(batch1)
-        validated_detections.extend(process_batch(batch1_items, batch1_tensors))
-
-    # Process batch 2
-    if len(batch2) > 0:
-        batch2_items, batch2_tensors = build_batch_from_items(batch2)
-        validated_detections.extend(process_batch(batch2_items, batch2_tensors))
-
-    return validated_detections
 def get_confidence_color(confidence):
     """Get color class based on confidence score"""
     if confidence >= 0.8:
@@ -1547,25 +1593,151 @@ def show_dashboard_page():
         fig_gauge.update_layout(height=400)
         st.plotly_chart(fig_gauge, use_container_width=True)
     
-    # Recent images gallery
+    # Individual Palm Analysis Section
     st.markdown("---")
-    st.markdown("### 📸 Recent Analyzed Images")
+    st.markdown("### 🌴 All Detected Palm Trees")
     
-    recent = db.get_recent_detections(limit=10)
+    # Get ALL individual palms from all detections
+    all_palms = db.get_all_individual_palms()
     
-    if recent:
-        cols = st.columns(5)
-        for idx, detection in enumerate(recent):
-            det_id, timestamp, img_name, total, healthy, unhealthy, health_rate, img_path = detection
+    if all_palms:
+        # Count statistics
+        total_all_palms = len(all_palms)
+        healthy_all = sum(1 for p in all_palms if p[5] == "Healthy")
+        unhealthy_all = total_all_palms - healthy_all
+        avg_conf_all = sum(p[6] for p in all_palms) / total_all_palms if total_all_palms > 0 else 0
+        
+        st.markdown(f"**Total Trees in Database:** {total_all_palms} | ✅ {healthy_all} Healthy | ⚠️ {unhealthy_all} Unhealthy | 📊 {(healthy_all/total_all_palms*100):.1f}% Health Rate")
+        
+        # SECTION 1: Cropped Images Grid (Latest Detection Only)
+        st.markdown("#### 📸 Latest Detection - Individual Trees")
+        
+        recent_with_palms = db.get_recent_detections(limit=1)
+        if recent_with_palms:
+            det_id, timestamp, img_name, total, healthy, unhealthy, health_rate, img_path = recent_with_palms[0]
+            st.markdown(f"**Image:** {img_name} - {timestamp}")
             
-            with cols[idx % 5]:
-                if img_path and os.path.exists(img_path):
-                    img = Image.open(img_path)
-                    img_thumbnail = img.resize((150, 150))
-                    st.image(img_thumbnail, caption=f"{img_name[:15]}...", use_container_width=True)
-                    st.caption(f"🌴 {total} | ✅ {healthy} | ⚠️ {unhealthy}")
-                else:
-                    st.info(f"{img_name}")
+            individual_palms = db.get_individual_palms(det_id)
+            
+            if individual_palms and img_path and os.path.exists(img_path):
+                orig_img = Image.open(img_path)
+                img_array = np.array(orig_img)
+                
+                # Create grid layout for palm images
+                cols_per_row = 6
+                rows = (len(individual_palms) + cols_per_row - 1) // cols_per_row
+                
+                for row in range(rows):
+                    cols = st.columns(cols_per_row)
+                    for col_idx in range(cols_per_row):
+                        palm_idx = row * cols_per_row + col_idx
+                        if palm_idx < len(individual_palms):
+                            palm_number, status, confidence, bbox_json = individual_palms[palm_idx]
+                            bbox = json.loads(bbox_json)
+                            
+                            with cols[col_idx]:
+                                # Crop palm from image
+                                x1, y1, x2, y2 = map(int, bbox)
+                                padding = 5
+                                x1_padded = max(0, x1 - padding)
+                                y1_padded = max(0, y1 - padding)
+                                x2_padded = min(img_array.shape[1], x2 + padding)
+                                y2_padded = min(img_array.shape[0], y2 + padding)
+                                
+                                # Ensure valid crop dimensions
+                                if x2_padded > x1_padded and y2_padded > y1_padded:
+                                    cropped_palm = img_array[y1_padded:y2_padded, x1_padded:x2_padded]
+                                    
+                                    # Verify cropped image is not empty
+                                    if cropped_palm.size > 0:
+                                        # Display cropped image (small size)
+                                        st.image(cropped_palm, use_container_width=True)
+                                    else:
+                                        st.warning(f"Invalid crop for tree #{palm_number}")
+                                else:
+                                    st.warning(f"Invalid bbox for tree #{palm_number}")
+                                
+                                # Status info
+                                status_emoji = "✅" if status == "Healthy" else "⚠️"
+                                status_color = "#28a745" if status == "Healthy" else "#dc3545"
+                                
+                                st.markdown(f"""
+                                <div style="text-align: center; padding: 5px; background-color: {status_color}20; border-radius: 5px; margin-top: 5px;">
+                                    <strong style="font-size: 14px;">#{palm_number}</strong><br>
+                                    <span style="font-size: 13px;">{status_emoji} {status}</span><br>
+                                    <span style="font-size: 13px;">{confidence:.0%}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
+        
+        # SECTION 2: Complete Table of ALL Trees from ALL Images
+        st.markdown("---")
+        st.markdown("#### 📋 Complete Detection Table - All Trees from All Images")
+        
+        # Create table data for ALL palms
+        table_data = []
+        tree_counter = 1
+        for detection_id, image_name, timestamp, image_path, palm_number, status, confidence, bbox_json in all_palms:
+            status_emoji = "✅" if status == "Healthy" else "⚠️"
+            
+            table_data.append({
+                'Global ID': tree_counter,
+                'Image': image_name[:30] + "..." if len(image_name) > 30 else image_name,
+                'Tree #': palm_number,
+                'Status': f"{status_emoji} {status}",
+                'Confidence': f"{confidence:.1%}",
+                'Detection Date': timestamp[:16]
+            })
+            tree_counter += 1
+        
+        # Create DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # Apply custom CSS for better readability
+        st.markdown("""
+        <style>
+        .dataframe {
+            font-size: 15px !important;
+            color: black !important;
+        }
+        .dataframe th {
+            font-size: 16px !important;
+            font-weight: bold !important;
+            background-color: #2E8B57 !important;
+            color: white !important;
+        }
+        .dataframe td {
+            font-size: 15px !important;
+            padding: 10px !important;
+            color: black !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Style the dataframe
+        def highlight_status(row):
+            if '✅' in row['Status']:
+                return ['background-color: #d4edda; font-size: 15px; color: black;'] * len(row)
+            else:
+                return ['background-color: #f8d7da; font-size: 15px; color: black;'] * len(row)
+        
+        styled_df = df.style.apply(highlight_status, axis=1).set_properties(**{
+            'font-size': '15px',
+            'text-align': 'left',
+            'color': 'black'
+        })
+        
+        st.dataframe(styled_df, use_container_width=True, height=500)
+        
+        # Summary statistics below table
+        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+        with col_stat1:
+            st.metric("Total Trees", total_all_palms)
+        with col_stat2:
+            st.metric("Healthy", healthy_all, delta=f"{(healthy_all/total_all_palms*100):.1f}%")
+        with col_stat3:
+            st.metric("Unhealthy", unhealthy_all, delta=f"{(unhealthy_all/total_all_palms*100):.1f}%", delta_color="inverse")
+        with col_stat4:
+            st.metric("Avg Confidence", f"{avg_conf_all:.1%}")
     
     # Recommendations
     st.markdown("---")
@@ -1805,7 +1977,7 @@ def show_old_upload_page():
                         analyze_btn = st.button(f"🔍 Analyze", key=f"analyze_{idx}")
                     
                     if analyze_btn or idx == 0:  # Auto-analyze first image
-                        # Enhanced YOLO detection (97% accuracy)
+                        # AI-powered palm health detection
                         with st.spinner("🤖 Analyzing palm health with AI..."):
                             results = auto_detect_palms(model, img, confidence_threshold=confidence_threshold)
                         
@@ -1978,6 +2150,44 @@ def show_old_upload_page():
                                 
                                 styled_df = df.style.applymap(style_status, subset=['Status'])
                                 st.dataframe(styled_df, use_container_width=True)
+                            
+                            # Individual Palm Crops Section
+                            st.markdown("---")
+                            st.markdown("#### 🌴 Individual Palm Tree Analysis")
+                            
+                            # Crop individual palms and classify with Faster R-CNN
+                            cropped_palms = crop_individual_palms(img, results, faster_rcnn_model)
+                            
+                            if cropped_palms:
+                                # Display cropped palms in a grid
+                                cols_per_row = 3
+                                rows = (len(cropped_palms) + cols_per_row - 1) // cols_per_row
+                                
+                                for row in range(rows):
+                                    cols = st.columns(cols_per_row)
+                                    for col_idx in range(cols_per_row):
+                                        palm_idx = row * cols_per_row + col_idx
+                                        if palm_idx < len(cropped_palms):
+                                            palm = cropped_palms[palm_idx]
+                                            
+                                            with cols[col_idx]:
+                                                # Display cropped palm image
+                                                st.image(
+                                                    palm['image'],
+                                                    caption=f"Palm {palm['id']}: {palm['status']}",
+                                                    use_container_width=True
+                                                )
+                                                
+                                                # Status badge with color
+                                                status_emoji = "✅" if palm['status'] == "Healthy" else "⚠️"
+                                                confidence_color = "🟢" if palm['confidence'] > 0.7 else "🟡" if palm['confidence'] > 0.4 else "🔴"
+                                                
+                                                st.markdown(f"""
+                                                <div style="text-align: center; padding: 5px; background-color: {palm['status_color']}20; border-radius: 5px; margin: 5px 0;">
+                                                    <strong>{status_emoji} {palm['status']}</strong><br>
+                                                    {confidence_color} {palm['confidence']:.1%} confidence
+                                                </div>
+                                                """, unsafe_allow_html=True)
                         
                         else:
                             st.warning("🔍 No palms detected in this image. Try adjusting the confidence threshold in the sidebar.")
@@ -1998,7 +2208,7 @@ def show_old_upload_page():
                 
                 <p><strong>🤖 AI Capabilities:</strong></p>
                 <ul>
-                    <li>✅ 97% accuracy rate with YOLOv8n architecture</li>
+                    <li>✅ High accuracy rate with advanced deep learning</li>
                     <li>🎯 Automatic detection optimization for different image types</li>
                     <li>🌴 Individual tree detection in dense plantations</li>
                     <li>📈 Real-time health classification and comprehensive analytics</li>

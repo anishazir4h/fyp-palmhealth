@@ -1,0 +1,111 @@
+def auto_detect_palms(yolo_model, faster_rcnn_model, image, confidence_threshold=0.15):
+    """Simple full-image detection with both YOLO and Faster R-CNN"""
+    st.info("🔍 Detecting palms with YOLO...")
+    
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    
+    yolo_results = yolo_model.predict(image, conf=confidence_threshold, verbose=False)
+    
+    if not yolo_results or len(yolo_results) == 0 or yolo_results[0].boxes is None or len(yolo_results[0].boxes) == 0:
+        st.warning("⚠️ No palms detected")
+        return yolo_results
+    
+    yolo_boxes = yolo_results[0].boxes
+    detections = []
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Process each YOLO detection
+    for i in range(len(yolo_boxes)):
+        yolo_box = yolo_boxes.xyxy[i].cpu().numpy()
+        yolo_conf = yolo_boxes.conf[i].item()
+        yolo_cls = int(yolo_boxes.cls[i].item())
+        
+        # Calculate box size
+        box_width = yolo_box[2] - yolo_box[0]
+        box_height = yolo_box[3] - yolo_box[1]
+        
+        # Filter 1: Reject oversized boxes (containing multiple palms)
+        if box_width > 200 or box_height > 200:
+            continue
+        
+        # Filter 2: Reject too small boxes
+        if box_width < 40 or box_height < 40:
+            continue
+        
+        # Filter 3: Reject extreme aspect ratios
+        aspect_ratio = box_width / box_height if box_height > 0 else 0
+        if aspect_ratio < 0.5 or aspect_ratio > 2.0:
+            continue
+        
+        # Use YOLO classification by default
+        best_cls, best_conf, validated = yolo_cls, yolo_conf, False
+        
+        # Try to validate with Faster R-CNN
+        if faster_rcnn_model:
+            try:
+                padding = 20
+                x1 = max(0, int(yolo_box[0] - padding))
+                y1 = max(0, int(yolo_box[1] - padding))
+                x2 = min(image.width, int(yolo_box[2] + padding))
+                y2 = min(image.height, int(yolo_box[3] + padding))
+                
+                crop = image.crop((x1, y1, x2, y2))
+                crop_resized = crop.resize((512, 512), Image.BILINEAR)
+                img_tensor = TF.to_tensor(crop_resized).to(device)
+                
+                with torch.no_grad():
+                    frcnn_results = faster_rcnn_model([img_tensor])
+                
+                if len(frcnn_results[0]['boxes']) > 0 and frcnn_results[0]['scores'][0].item() > 0.3:
+                    best_cls = int(frcnn_results[0]['labels'][0].item()) - 1
+                    best_conf = frcnn_results[0]['scores'][0].item()
+                    validated = True
+            except:
+                pass
+        
+        detections.append({
+            'box': yolo_box,
+            'cls': best_cls,
+            'conf': best_conf,
+            'validated': validated
+        })
+    
+    if len(detections) == 0:
+        st.warning("⚠️ No valid palms (all filtered out)")
+        return yolo_results
+    
+    validated_count = sum(1 for d in detections if d['validated'])
+    st.success(f"✅ {len(detections)} palms ({validated_count} validated by Faster R-CNN)")
+    
+    class ValidatedBoxes:
+        def __init__(self, d):
+            self.xyxy = torch.tensor([x['box'] for x in d])
+            self.conf = torch.tensor([x['conf'] for x in d])
+            self.cls = torch.tensor([x['cls'] for x in d])
+        def __len__(self):
+            return len(self.xyxy)
+    
+    class ValidatedResult:
+        def __init__(self, d, s):
+            self.boxes = ValidatedBoxes(d) if d else None
+            self.orig_shape = s
+        def plot(self):
+            img_array = np.array(image)
+            if self.boxes and len(self.boxes) > 0:
+                for i in range(len(self.boxes)):
+                    box = self.boxes.xyxy[i].numpy()
+                    conf = self.boxes.conf[i].item()
+                    cls = int(self.boxes.cls[i].item())
+                    validated = detections[i]['validated']
+                    
+                    # cls 0 = PalmAnom (Unhealthy), cls 1 = PalmSan (Healthy)
+                    color = (0, 255, 0) if cls == 1 else (255, 0, 0)
+                    thickness = 4 if validated else 2
+                    
+                    cv2.rectangle(img_array, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), color, thickness)
+                    label = f"{'Healthy' if cls == 1 else 'Unhealthy'} {conf:.2f}" + (" ✓" if validated else "")
+                    cv2.putText(img_array, label, (int(box[0]), int(box[1]-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            return img_array
+    
+    return [ValidatedResult(detections, (image.height, image.width))]

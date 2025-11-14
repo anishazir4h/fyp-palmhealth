@@ -1,0 +1,10 @@
+{
+  "classes": [
+    "PalmAnom",
+    "PalmSan"
+  ],
+  "class_to_id": {
+    "PalmAnom": 1,
+    "PalmSan": 2
+  }
+}

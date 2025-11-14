@@ -211,6 +211,48 @@ class PalmDatabase:
         conn.commit()
         conn.close()
     
+    def get_individual_palms(self, detection_id):
+        """Get individual palm records for a specific detection"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT palm_number, status, confidence, bbox
+            FROM individual_palms
+            WHERE detection_id = ?
+            ORDER BY palm_number
+        """, (detection_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+    
+    def get_all_individual_palms(self):
+        """Get all individual palm records from all detections with image info"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                d.id as detection_id,
+                d.image_name,
+                d.timestamp,
+                d.image_path,
+                ip.palm_number,
+                ip.status,
+                ip.confidence,
+                ip.bbox
+            FROM individual_palms ip
+            JOIN detections d ON ip.detection_id = d.id
+            ORDER BY d.timestamp DESC, ip.palm_number
+        """)
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+    
     def clear_all_data(self):
         """Clear all data from database (use with caution)"""
         conn = sqlite3.connect(self.db_path)

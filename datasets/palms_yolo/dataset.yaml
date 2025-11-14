@@ -1,0 +1,8 @@
+names:
+  0: PalmAnom
+  1: PalmSan
+nc: 2
+path: datasets/palms_yolo
+test: test/images
+train: train_aug/images
+val: valid/images
