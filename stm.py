@@ -749,9 +749,7 @@ def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
 
 def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=None):
     """
-    OPTIMIZED 2-STEP: YOLO detection → Faster R-CNN validation
-    - Step 1: YOLO detects all palms (fast, optimized)
-    - Step 2: Faster R-CNN validates (batched for speed)
+    AI-powered palm detection
     """
     
     try:
@@ -766,11 +764,11 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
             ratio = max_size / max(image.size)
             new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
             image = image.resize(new_size, Image.Resampling.LANCZOS)
-            status_text.text(f"📐 Resized from {original_size} to {new_size} for speed...")
+            status_text.text(f"📐 Optimizing image size...")
             progress_bar.progress(5)
         
-        # Step 1: YOLO Detection (optimized settings)
-        status_text.text("🔍 Step 1/2: Detecting palms with YOLO...")
+        # Detection
+        status_text.text("🔍 Detecting palm trees...")
         progress_bar.progress(10)
         
         results = model.predict(
@@ -863,31 +861,8 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
     
     progress_bar.progress(60)
 
-    # If a validation model is provided, validate detections (optimized)
-    if validation_model is not None and detections:
-        try:
-            status_text.text("✓ Step 2/2: Validating detections (batched)...")
-            progress_bar.progress(70)
-            
-            # Limit validation to improve speed - validate top detections only
-            max_validate = 100
-            if len(detections) > max_validate:
-                # Sort by confidence and validate top detections
-                sorted_dets = sorted(detections, key=lambda x: x['conf'], reverse=True)
-                to_validate = sorted_dets[:max_validate]
-                skipped = sorted_dets[max_validate:]
-                
-                validated = validate_with_faster_rcnn_2batch(to_validate, image, validation_model)
-                detections = validated + skipped
-            else:
-                validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
-                detections = validated
-            
-            progress_bar.progress(85)
-        except Exception as e:
-            st.warning(f"⚠️ Validation failed, using YOLO detections only")
-            # Continue with unvalidated detections
-            progress_bar.progress(85)
+    # Skip validation step (removed for speed)
+    progress_bar.progress(85)
     
     # MERGE OVERLAPPING BOXES - Remove boxes where 50%+ of area is covered by other boxes combined
     if detections and len(detections) > 1:
@@ -1455,31 +1430,19 @@ def show_upload_page():
     """Upload and analyze page"""
     st.markdown('<h1 class="main-header">📤 Upload & Analyze Palm Images</h1>', unsafe_allow_html=True)
     
-    # Settings panel
-    with st.expander("⚙️ Detection Settings", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            enable_validation = st.checkbox(
-                "Enable Two-Stage Validation", 
-                value=True,
-                help="Use Faster R-CNN to validate YOLO detections. Disable for faster processing."
-            )
-            confidence = st.slider(
-                "Confidence Threshold", 
-                0.01, 0.5, 0.05, 0.01,
-                help="Lower = detect more palms but may include false positives"
-            )
-        with col2:
-            if enable_validation:
-                st.info("🔬 **Two-Stage Detection**\n\nYOLO + Faster R-CNN validation\n\n⏱️ Slower but more accurate")
-            else:
-                st.success("⚡ **Fast Mode**\n\nYOLO detection only\n\n⚡ 3-5x faster processing")
+    # Settings panel with user-friendly language
+    with st.expander("⚙️ Settings", expanded=False):
+        confidence = st.slider(
+            "Detection Sensitivity", 
+            0.01, 0.5, 0.05, 0.01,
+            help="Lower = detect more palms (may include some false positives)\nHigher = only detect clear palms (may miss some)"
+        )
     
-    # Load models with error handling
+    # Load model with error handling
     try:
         yolo_model, frcnn_model, model_info = load_model()
     except Exception as e:
-        st.error(f"❌ Error loading models: {str(e)}")
+        st.error(f"❌ Error loading detection model: {str(e)}")
         import traceback
         with st.expander("Show detailed error"):
             st.code(traceback.format_exc())
@@ -1513,14 +1476,13 @@ def show_upload_page():
                 img_path = os.path.join(img_dir, uploaded_file.name)
                 img.save(img_path)
                 
-                # Detect with user-selected settings
-                with st.spinner("🤖 Analyzing..."):
-                    validation_model = frcnn_model if enable_validation else None
+                # Analyze image
+                with st.spinner("🤖 Analyzing image..."):
                     results = auto_detect_palms(
                         yolo_model, 
                         img, 
                         confidence_threshold=confidence, 
-                        validation_model=validation_model
+                        validation_model=None  # Skip validation for speed
                     )
                 
                 # Create summary
