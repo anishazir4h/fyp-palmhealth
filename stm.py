@@ -1455,6 +1455,26 @@ def show_upload_page():
     """Upload and analyze page"""
     st.markdown('<h1 class="main-header">📤 Upload & Analyze Palm Images</h1>', unsafe_allow_html=True)
     
+    # Settings panel
+    with st.expander("⚙️ Detection Settings", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            enable_validation = st.checkbox(
+                "Enable Two-Stage Validation", 
+                value=True,
+                help="Use Faster R-CNN to validate YOLO detections. Disable for faster processing."
+            )
+            confidence = st.slider(
+                "Confidence Threshold", 
+                0.01, 0.5, 0.05, 0.01,
+                help="Lower = detect more palms but may include false positives"
+            )
+        with col2:
+            if enable_validation:
+                st.info("🔬 **Two-Stage Detection**\n\nYOLO + Faster R-CNN validation\n\n⏱️ Slower but more accurate")
+            else:
+                st.success("⚡ **Fast Mode**\n\nYOLO detection only\n\n⚡ 3-5x faster processing")
+    
     # Load models with error handling
     try:
         yolo_model, frcnn_model, model_info = load_model()
@@ -1493,9 +1513,15 @@ def show_upload_page():
                 img_path = os.path.join(img_dir, uploaded_file.name)
                 img.save(img_path)
                 
-                # Detect with YOLO + Faster R-CNN validation (automatic)
+                # Detect with user-selected settings
                 with st.spinner("🤖 Analyzing..."):
-                    results = auto_detect_palms(yolo_model, img, confidence_threshold=0.05, validation_model=frcnn_model)
+                    validation_model = frcnn_model if enable_validation else None
+                    results = auto_detect_palms(
+                        yolo_model, 
+                        img, 
+                        confidence_threshold=confidence, 
+                        validation_model=validation_model
+                    )
                 
                 # Create summary
                 summary = create_detection_summary(results)
