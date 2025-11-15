@@ -1,5 +1,11 @@
 
 import streamlit as st
+import os
+
+# Set environment variables FIRST
+os.environ['TORCH_HOME'] = '/tmp/.torch'
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
+
 from ultralytics import YOLO
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
@@ -16,12 +22,7 @@ import torchvision
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 import torchvision.transforms.functional as TF
-import os
 from database import PalmDatabase
-
-# Disable unnecessary downloads
-os.environ['TORCH_HOME'] = '/tmp/.torch'
-os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
 # Database will be initialized in main()
 db = None
