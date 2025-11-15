@@ -674,14 +674,64 @@ def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
     filtered_scores = scores[valid_indices]
     
     # Apply NMS with the provided threshold to remove duplicates
-    from torchvision.ops import nms
-    keep_indices = nms(filtered_boxes, filtered_scores, iou_threshold)
+    # Use custom NMS implementation for Streamlit Cloud compatibility
+    try:
+        from torchvision.ops import nms
+        keep_indices = nms(filtered_boxes, filtered_scores, iou_threshold)
+    except:
+        # Fallback to custom NMS if torchvision.ops fails
+        keep_indices = custom_nms(filtered_boxes, filtered_scores, iou_threshold)
     
     # Return kept detections
     final_indices = [valid_indices[i] for i in keep_indices]
     merged = [detections[i] for i in final_indices]
     
     return merged
+
+def custom_nms(boxes, scores, iou_threshold):
+    """Custom NMS implementation for when torchvision.ops is unavailable"""
+    import torch
+    
+    if len(boxes) == 0:
+        return torch.tensor([], dtype=torch.long)
+    
+    # Get coordinates
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+    
+    # Compute areas
+    areas = (x2 - x1) * (y2 - y1)
+    
+    # Sort by scores
+    order = scores.argsort(descending=True)
+    
+    keep = []
+    while len(order) > 0:
+        i = order[0]
+        keep.append(i.item())
+        
+        if len(order) == 1:
+            break
+        
+        # Compute IoU
+        xx1 = torch.maximum(x1[i], x1[order[1:]])
+        yy1 = torch.maximum(y1[i], y1[order[1:]])
+        xx2 = torch.minimum(x2[i], x2[order[1:]])
+        yy2 = torch.minimum(y2[i], y2[order[1:]])
+        
+        w = torch.clamp(xx2 - xx1, min=0.0)
+        h = torch.clamp(yy2 - yy1, min=0.0)
+        
+        inter = w * h
+        iou = inter / (areas[i] + areas[order[1:]] - inter)
+        
+        # Keep boxes with IoU less than threshold
+        inds = torch.where(iou <= iou_threshold)[0]
+        order = order[inds + 1]
+    
+    return torch.tensor(keep, dtype=torch.long)
 
 def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=None):
     """
