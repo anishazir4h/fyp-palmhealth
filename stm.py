@@ -636,6 +636,51 @@ def merge_overlapping_boxes(detections, overlap_threshold=0.5):
     merged = [detections[i] for i in keep]
     return merged
 
+def custom_nms(boxes, scores, iou_threshold):
+    """Custom NMS implementation for when torchvision.ops is unavailable"""
+    import torch
+    
+    if len(boxes) == 0:
+        return torch.tensor([], dtype=torch.long)
+    
+    # Get coordinates
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+    
+    # Compute areas
+    areas = (x2 - x1) * (y2 - y1)
+    
+    # Sort by scores
+    order = scores.argsort(descending=True)
+    
+    keep = []
+    while len(order) > 0:
+        i = order[0]
+        keep.append(i.item())
+        
+        if len(order) == 1:
+            break
+        
+        # Compute IoU
+        xx1 = torch.maximum(x1[i], x1[order[1:]])
+        yy1 = torch.maximum(y1[i], y1[order[1:]])
+        xx2 = torch.minimum(x2[i], x2[order[1:]])
+        yy2 = torch.minimum(y2[i], y2[order[1:]])
+        
+        w = torch.clamp(xx2 - xx1, min=0.0)
+        h = torch.clamp(yy2 - yy1, min=0.0)
+        
+        inter = w * h
+        iou = inter / (areas[i] + areas[order[1:]] - inter)
+        
+        # Keep boxes with IoU less than threshold
+        inds = torch.where(iou <= iou_threshold)[0]
+        order = order[inds + 1]
+    
+    return torch.tensor(keep, dtype=torch.long)
+
 def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
     """
     Merge overlapping detections from tiled approach
@@ -687,51 +732,6 @@ def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
     merged = [detections[i] for i in final_indices]
     
     return merged
-
-def custom_nms(boxes, scores, iou_threshold):
-    """Custom NMS implementation for when torchvision.ops is unavailable"""
-    import torch
-    
-    if len(boxes) == 0:
-        return torch.tensor([], dtype=torch.long)
-    
-    # Get coordinates
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-    
-    # Compute areas
-    areas = (x2 - x1) * (y2 - y1)
-    
-    # Sort by scores
-    order = scores.argsort(descending=True)
-    
-    keep = []
-    while len(order) > 0:
-        i = order[0]
-        keep.append(i.item())
-        
-        if len(order) == 1:
-            break
-        
-        # Compute IoU
-        xx1 = torch.maximum(x1[i], x1[order[1:]])
-        yy1 = torch.maximum(y1[i], y1[order[1:]])
-        xx2 = torch.minimum(x2[i], x2[order[1:]])
-        yy2 = torch.minimum(y2[i], y2[order[1:]])
-        
-        w = torch.clamp(xx2 - xx1, min=0.0)
-        h = torch.clamp(yy2 - yy1, min=0.0)
-        
-        inter = w * h
-        iou = inter / (areas[i] + areas[order[1:]] - inter)
-        
-        # Keep boxes with IoU less than threshold
-        inds = torch.where(iou <= iou_threshold)[0]
-        order = order[inds + 1]
-    
-    return torch.tensor(keep, dtype=torch.long)
 
 def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=None):
     """
