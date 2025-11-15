@@ -23,8 +23,8 @@ from database import PalmDatabase
 os.environ['TORCH_HOME'] = '/tmp/.torch'
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
-# Initialize database
-db = PalmDatabase()
+# Database will be initialized in main()
+db = None
 
 # Page configuration
 st.set_page_config(
@@ -325,17 +325,24 @@ def load_model():
         try:
             if os.path.exists(path):
                 # Load model architecture without pretrained weights
-                frcnn_model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
+                try:
+                    # Try with weights_backbone parameter (newer torchvision)
+                    frcnn_model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
+                except TypeError:
+                    # Fallback for older torchvision versions
+                    frcnn_model = fasterrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=False)
+                
                 in_features = frcnn_model.roi_heads.box_predictor.cls_score.in_features
                 frcnn_model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 3)
                 
-                frcnn_checkpoint = torch.load(path, map_location=device)
+                frcnn_checkpoint = torch.load(path, map_location=device, weights_only=False)
                 frcnn_model.load_state_dict(frcnn_checkpoint)
                 frcnn_model.to(device)
                 frcnn_model.eval()
                 frcnn_path = path
                 break
         except Exception as e:
+            st.warning(f"Failed to load Faster R-CNN from {path}: {str(e)}")
             continue
     
     if yolo_model is None or frcnn_model is None:
@@ -1212,6 +1219,15 @@ def create_health_chart(summary):
     return fig
 
 def main():
+    # Initialize database
+    global db
+    if db is None:
+        try:
+            db = PalmDatabase()
+        except Exception as e:
+            st.error(f"Database initialization error: {str(e)}")
+            db = PalmDatabase()  # Try again
+    
     # Sidebar Navigation
     st.sidebar.title("🌴 Palm Health System")
     st.sidebar.markdown("---")
@@ -1398,8 +1414,15 @@ def show_upload_page():
     """Upload and analyze page"""
     st.markdown('<h1 class="main-header">📤 Upload & Analyze Palm Images</h1>', unsafe_allow_html=True)
     
-    # Load models
-    yolo_model, frcnn_model, model_info = load_model()
+    # Load models with error handling
+    try:
+        yolo_model, frcnn_model, model_info = load_model()
+    except Exception as e:
+        st.error(f"❌ Error loading models: {str(e)}")
+        import traceback
+        with st.expander("Show detailed error"):
+            st.code(traceback.format_exc())
+        return
     
     if yolo_model is None:
         st.error("❌ Failed to load models")
