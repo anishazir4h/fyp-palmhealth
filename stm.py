@@ -1242,10 +1242,9 @@ def main():
                     pass
             db = DummyDB()
     
-    try:
-        # Sidebar Navigation
-        st.sidebar.title("🌴 Palm Health System")
-        st.sidebar.markdown("---")
+    # Sidebar Navigation
+    st.sidebar.title("🌴 Palm Health System")
+    st.sidebar.markdown("---")
     
     # Initialize current page in session state if not exists
     if 'current_page' not in st.session_state:
