@@ -1486,16 +1486,15 @@ def show_upload_page():
                 img_path = os.path.join(img_dir, uploaded_file.name)
                 img.save(img_path)
                 
-                # Detect with optimized settings
+                # Detect - skip validation for speed
                 with st.spinner("🤖 Analyzing..."):
-                    validation_model = frcnn_model if enable_validation else None
                     results = auto_detect_palms(
                         yolo_model, 
                         img, 
-                        confidence_threshold=confidence, 
-                        validation_model=validation_model,
-                        enable_validation=enable_validation,
-                        max_image_size=max_size
+                        confidence_threshold=0.05, 
+                        validation_model=None,  # Skip validation for speed
+                        enable_validation=False,
+                        max_image_size=1280
                     )
                 
                 # Create summary
