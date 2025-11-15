@@ -1225,12 +1225,27 @@ def main():
         try:
             db = PalmDatabase()
         except Exception as e:
-            st.error(f"Database initialization error: {str(e)}")
-            db = PalmDatabase()  # Try again
+            st.error(f"❌ Database initialization error: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            # Create a dummy database object to prevent further errors
+            class DummyDB:
+                def get_statistics(self):
+                    return {
+                        'total_images': 0, 'total_palms': 0, 'total_healthy': 0,
+                        'total_unhealthy': 0, 'avg_health_rate': 0, 'avg_confidence': 0,
+                        'trend_data': []
+                    }
+                def get_all_detections(self):
+                    return []
+                def save_detection(self, *args, **kwargs):
+                    pass
+            db = DummyDB()
     
-    # Sidebar Navigation
-    st.sidebar.title("🌴 Palm Health System")
-    st.sidebar.markdown("---")
+    try:
+        # Sidebar Navigation
+        st.sidebar.title("🌴 Palm Health System")
+        st.sidebar.markdown("---")
     
     # Initialize current page in session state if not exists
     if 'current_page' not in st.session_state:
@@ -2456,4 +2471,9 @@ def show_old_upload_page():
         st.markdown(f"**📅 Last Updated:** {datetime.now().strftime('%Y-%m-%d')}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Fatal Error: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
