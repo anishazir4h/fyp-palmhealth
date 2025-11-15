@@ -1316,7 +1316,7 @@ def show_home_page():
     # Primary CTA button
     col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
     with col_cta2:
-        if st.button("🚀 Start Analyzing Palm Images", key="primary_cta", use_column_width=True, type="primary"):
+        if st.button("🚀 Start Analyzing Palm Images", key="primary_cta", type="primary"):
             st.session_state.navigate_to = "📤 Upload & Analyze"
             st.rerun()
     
@@ -1349,7 +1349,7 @@ def show_home_page():
             <p style="font-size: 0.875rem; color: #B0B0B0; margin: 0.5rem 0;">Upload images for instant AI detection</p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Go to Upload", key="nav_upload_btn", use_column_width=True):
+        if st.button("Go to Upload", key="nav_upload_btn"):
             st.session_state.navigate_to = "📤 Upload & Analyze"
             st.rerun()
     
@@ -1361,7 +1361,7 @@ def show_home_page():
             <p style="font-size: 0.875rem; color: #B0B0B0; margin: 0.5rem 0;">Analytics, charts & insights</p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Go to Dashboard", key="nav_dashboard_btn", use_column_width=True):
+        if st.button("Go to Dashboard", key="nav_dashboard_btn"):
             st.session_state.navigate_to = "📊 Dashboard"
             st.rerun()
     
@@ -1373,7 +1373,7 @@ def show_home_page():
             <p style="font-size: 0.875rem; color: #B0B0B0; margin: 0.5rem 0;">View all past detections</p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Go to History", key="nav_history_btn", use_column_width=True):
+        if st.button("Go to History", key="nav_history_btn"):
             st.session_state.navigate_to = "📋 Detection History"
             st.rerun()
     
@@ -1433,21 +1433,6 @@ def show_upload_page():
     """Upload and analyze page"""
     st.markdown('<h1 class="main-header">📤 Upload & Analyze Palm Images</h1>', unsafe_allow_html=True)
     
-    # Performance Settings
-    with st.expander("⚙️ Performance Settings", expanded=False):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            enable_validation = st.checkbox("Enable Validation", value=False, 
-                help="Use Faster R-CNN to validate YOLO detections (slower but more accurate)")
-        with col2:
-            max_size = st.select_slider("Max Image Size", 
-                options=[640, 1280, 1920, 2560], 
-                value=1280,
-                help="Larger images = better accuracy but slower processing")
-        with col3:
-            confidence = st.slider("Confidence Threshold", 0.01, 0.5, 0.05, 0.01,
-                help="Lower = detect more palms but may include false positives")
-    
     # Load models with error handling
     try:
         yolo_model, frcnn_model, model_info = load_model()
@@ -1486,14 +1471,9 @@ def show_upload_page():
                 img_path = os.path.join(img_dir, uploaded_file.name)
                 img.save(img_path)
                 
-                # Detect - skip validation for speed
+                # Detect with YOLO + Faster R-CNN validation (automatic)
                 with st.spinner("🤖 Analyzing..."):
-                    results = auto_detect_palms(
-                        yolo_model, 
-                        img, 
-                        confidence_threshold=0.05, 
-                        validation_model=None  # Skip validation for speed
-                    )
+                    results = auto_detect_palms(yolo_model, img, confidence_threshold=0.05, validation_model=frcnn_model)
                 
                 # Create summary
                 summary = create_detection_summary(results)
@@ -1520,7 +1500,7 @@ def show_upload_page():
                                 # Try to use YOLO plot if available
                                 if hasattr(results[0], 'plot'):
                                     res_plotted = results[0].plot()
-                                    st.image(res_plotted, use_column_width=True)
+                                    st.image(res_plotted, use_container_width=True)
                                 else:
                                     # Manual drawing for MockResult
                                     import cv2
@@ -1554,12 +1534,12 @@ def show_upload_page():
                                     
                                     # Convert back to RGB for display
                                     img_draw = cv2.cvtColor(img_draw, cv2.COLOR_BGR2RGB)
-                                    st.image(img_draw, use_column_width=True)
+                                    st.image(img_draw, use_container_width=True)
                             except Exception as e:
-                                st.image(img, use_column_width=True)
+                                st.image(img, use_container_width=True)
                                 st.caption(f"Note: Showing original image (visualization error)")
                         else:
-                            st.image(img, use_column_width=True)
+                            st.image(img, use_container_width=True)
                     
                     with col_stats:
                         st.markdown("#### 📊 Detection Summary")
@@ -1594,7 +1574,7 @@ def show_upload_page():
                                         st.image(
                                             palm['image'],
                                             caption=f"Palm {palm['id']}: {palm['status']}",
-                                            use_column_width=True
+                                            use_container_width=True
                                         )
                                         
                                         # Status badge with color
@@ -1682,7 +1662,7 @@ def show_dashboard_page():
             title="Overall Health Distribution",
             height=400
         )
-        st.plotly_chart(fig_pie, use_column_width=True)
+        st.plotly_chart(fig_pie, use_container_width=True)
     
     with chart_col2:
         # Bar chart - Comparison
@@ -1695,7 +1675,7 @@ def show_dashboard_page():
             height=400,
             barmode='group'
         )
-        st.plotly_chart(fig_bar, use_column_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True)
     
     # Charts row 2
     chart_col3, chart_col4 = st.columns(2)
@@ -1721,7 +1701,7 @@ def show_dashboard_page():
                 yaxis_title="Health Rate (%)",
                 height=400
             )
-            st.plotly_chart(fig_trend, use_column_width=True)
+            st.plotly_chart(fig_trend, use_container_width=True)
     
     with chart_col4:
         # Gauge chart for average health
@@ -1747,7 +1727,7 @@ def show_dashboard_page():
             }
         ))
         fig_gauge.update_layout(height=400)
-        st.plotly_chart(fig_gauge, use_column_width=True)
+        st.plotly_chart(fig_gauge, use_container_width=True)
     
     # Individual Palm Analysis Section
     st.markdown("---")
@@ -1807,7 +1787,7 @@ def show_dashboard_page():
                                     # Verify cropped image is not empty
                                     if cropped_palm.size > 0:
                                         # Display cropped image (small size)
-                                        st.image(cropped_palm, use_column_width=True)
+                                        st.image(cropped_palm, use_container_width=True)
                                     else:
                                         st.warning(f"Invalid crop for tree #{palm_number}")
                                 else:
@@ -1882,7 +1862,7 @@ def show_dashboard_page():
             'color': 'black'
         })
         
-        st.dataframe(styled_df, use_column_width=True, height=500)
+        st.dataframe(styled_df, use_container_width=True, height=500)
         
         # Summary statistics below table
         col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
@@ -2010,7 +1990,7 @@ def show_history_page():
         })
     
     df = pd.DataFrame(df_data)
-    st.dataframe(df, use_column_width=True)
+    st.dataframe(df, use_container_width=True)
     
     # Detailed view
     st.markdown("---")
@@ -2025,7 +2005,7 @@ def show_history_page():
             with col1:
                 if img_path and os.path.exists(img_path):
                     img = Image.open(img_path)
-                    st.image(img, use_column_width=True)
+                    st.image(img, use_container_width=True)
                 else:
                     st.info("Image not found")
             
@@ -2200,19 +2180,19 @@ def show_old_upload_page():
                                         st.image(
                                             res_plotted, 
                                             caption=f"Detection Results - {uploaded_file.name}",
-                                            use_column_width=True
+                                            use_container_width=True
                                         )
                                     except:
-                                        st.image(img, caption=f"Original Image - {uploaded_file.name}", use_column_width=True)
+                                        st.image(img, caption=f"Original Image - {uploaded_file.name}", use_container_width=True)
                                 else:
-                                    st.image(img, caption=f"No Palms Detected - {uploaded_file.name}", use_column_width=True)
+                                    st.image(img, caption=f"No Palms Detected - {uploaded_file.name}", use_container_width=True)
                             
                             with col_chart:
                                 st.markdown("#### 📊 Health Distribution")
                                 # Create pie chart
                                 health_chart = create_health_chart(summary)
                                 if health_chart:
-                                    st.plotly_chart(health_chart, use_column_width=True)
+                                    st.plotly_chart(health_chart, use_container_width=True)
                                 
                                 # Health metrics with progress bar
                                 st.markdown("#### 🎯 Health Metrics")
@@ -2262,7 +2242,7 @@ def show_old_upload_page():
                                             with cols[col_idx]:
                                                 st.image(
                                                     palm['image'],
-                                                    use_column_width=True
+                                                    use_container_width=True
                                                 )
                                                 
                                                 status_emoji = "✅" if palm['status'] == "Healthy" else "⚠️"
@@ -2305,7 +2285,7 @@ def show_old_upload_page():
                                         return 'background-color: #f8d7da; color: #721c24'
                                 
                                 styled_df = df.style.applymap(style_status, subset=['Status'])
-                                st.dataframe(styled_df, use_column_width=True)
+                                st.dataframe(styled_df, use_container_width=True)
                             
                             # Individual Palm Crops Section
                             st.markdown("---")
@@ -2331,7 +2311,7 @@ def show_old_upload_page():
                                                 st.image(
                                                     palm['image'],
                                                     caption=f"Palm {palm['id']}: {palm['status']}",
-                                                    use_column_width=True
+                                                    use_container_width=True
                                                 )
                                                 
                                                 # Status badge with color
@@ -2347,7 +2327,7 @@ def show_old_upload_page():
                         
                         else:
                             st.warning("🔍 No palms detected in this image. Try adjusting the confidence threshold in the sidebar.")
-                            st.image(img, caption=f"Original Image - {uploaded_file.name}", use_column_width=True)
+                            st.image(img, caption=f"Original Image - {uploaded_file.name}", use_container_width=True)
         
         else:
             # Welcome message with nice design
@@ -2434,7 +2414,7 @@ def show_old_upload_page():
                     marker_colors=['#4CAF50', '#F44336']
                 )])
                 fig_overall.update_layout(title="Overall Health Distribution", height=400)
-                st.plotly_chart(fig_overall, use_column_width=True)
+                st.plotly_chart(fig_overall, use_container_width=True)
             
             with col_chart2:
                 # Bar chart
@@ -2443,7 +2423,7 @@ def show_old_upload_page():
                     go.Bar(name='Unhealthy', x=['Palms'], y=[st.session_state.total_unhealthy], marker_color='#F44336')
                 ])
                 fig_bar.update_layout(title="Health Comparison", height=400, barmode='group')
-                st.plotly_chart(fig_bar, use_column_width=True)
+                st.plotly_chart(fig_bar, use_container_width=True)
     
     with tab3:
         st.markdown("### 📖 User Guide")
