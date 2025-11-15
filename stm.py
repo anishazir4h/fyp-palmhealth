@@ -26,16 +26,17 @@ os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 # Database will be initialized in main()
 db = None
 
-# Page configuration
-st.set_page_config(
-    page_title="Palm Health Detection System",
-    page_icon="🌴",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS - Dark Theme with Readable Fonts
-st.markdown("""
+def setup_page_config():
+    """Configure Streamlit page settings and CSS - must be called first in main()"""
+    st.set_page_config(
+        page_title="Palm Health Detection System",
+        page_icon="🌴",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Custom CSS - Dark Theme with Readable Fonts
+    st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
     
@@ -1219,6 +1220,9 @@ def create_health_chart(summary):
     return fig
 
 def main():
+    # Setup page configuration FIRST
+    setup_page_config()
+    
     # Initialize database
     global db
     if db is None:
