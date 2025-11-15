@@ -1492,9 +1492,7 @@ def show_upload_page():
                         yolo_model, 
                         img, 
                         confidence_threshold=0.05, 
-                        validation_model=None,  # Skip validation for speed
-                        enable_validation=False,
-                        max_image_size=1280
+                        validation_model=None  # Skip validation for speed
                     )
                 
                 # Create summary
