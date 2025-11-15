@@ -19,6 +19,10 @@ import torchvision.transforms.functional as TF
 import os
 from database import PalmDatabase
 
+# Disable unnecessary downloads
+os.environ['TORCH_HOME'] = '/tmp/.torch'
+os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
+
 # Initialize database
 db = PalmDatabase()
 
@@ -320,7 +324,8 @@ def load_model():
     for path in possible_frcnn_paths:
         try:
             if os.path.exists(path):
-                frcnn_model = fasterrcnn_resnet50_fpn(weights=None)
+                # Load model architecture without pretrained weights
+                frcnn_model = fasterrcnn_resnet50_fpn(weights=None, weights_backbone=None)
                 in_features = frcnn_model.roi_heads.box_predictor.cls_score.in_features
                 frcnn_model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 3)
                 
