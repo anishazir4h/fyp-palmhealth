@@ -749,9 +749,9 @@ def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
 
 def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=None):
     """
-    SIMPLE 2-STEP: YOLO detection → Faster R-CNN validation
-    - Step 1: YOLO detects all palms (fast, single pass)
-    - Step 2: Faster R-CNN validates to confirm individual tree crowns (automatic, transparent)
+    OPTIMIZED 2-STEP: YOLO detection → Faster R-CNN validation
+    - Step 1: YOLO detects all palms (fast, optimized)
+    - Step 2: Faster R-CNN validates (batched for speed)
     """
     
     try:
@@ -759,7 +759,17 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Step 1: YOLO Detection (single pass, no tiling)
+        # Resize large images for faster processing
+        original_size = image.size
+        max_size = 1920
+        if max(image.size) > max_size:
+            ratio = max_size / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            status_text.text(f"📐 Resized from {original_size} to {new_size} for speed...")
+            progress_bar.progress(5)
+        
+        # Step 1: YOLO Detection (optimized settings)
         status_text.text("🔍 Step 1/2: Detecting palms with YOLO...")
         progress_bar.progress(10)
         
@@ -768,7 +778,9 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
             conf=confidence_threshold,
             iou=0.45,
             max_det=300,
-            verbose=False
+            verbose=False,
+            imgsz=1280,  # Faster inference size
+            half=False   # Use FP32 for CPU compatibility
         )
     except Exception as e:
         st.error(f"Error during YOLO detection: {str(e)}")
@@ -808,8 +820,8 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
         green_density = 0.0
 
     use_tiling = False
-    # If image is large and green density is high or YOLO found very few boxes, switch to tile-based detection
-    if (green_density > 0.12 and (image.size[0] * image.size[1] > 512 * 512)) or initial_count < 5:
+    # Only use tiling for very dense plantations with poor initial detection
+    if initial_count < 3 and green_density > 0.15 and (image.size[0] * image.size[1] > 1000000):
         use_tiling = True
 
     # If tiling is selected, run tile-based detection then merge
@@ -851,20 +863,29 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
     
     progress_bar.progress(60)
 
-    # If a validation model is provided, validate detections
+    # If a validation model is provided, validate detections (optimized)
     if validation_model is not None and detections:
         try:
-            status_text.text("✓ Step 2/2: Validating detections...")
+            status_text.text("✓ Step 2/2: Validating detections (batched)...")
             progress_bar.progress(70)
             
-            validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
-            detections = validated
+            # Limit validation to improve speed - validate top detections only
+            max_validate = 100
+            if len(detections) > max_validate:
+                # Sort by confidence and validate top detections
+                sorted_dets = sorted(detections, key=lambda x: x['conf'], reverse=True)
+                to_validate = sorted_dets[:max_validate]
+                skipped = sorted_dets[max_validate:]
+                
+                validated = validate_with_faster_rcnn_2batch(to_validate, image, validation_model)
+                detections = validated + skipped
+            else:
+                validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
+                detections = validated
             
             progress_bar.progress(85)
         except Exception as e:
-            st.error(f"Error during validation: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+            st.warning(f"⚠️ Validation failed, using YOLO detections only")
             # Continue with unvalidated detections
             progress_bar.progress(85)
     
@@ -945,8 +966,8 @@ def validate_with_faster_rcnn_2batch(detections, image, faster_rcnn_model, conf_
         return valid_detections
     
     # Process all valid detections with Faster R-CNN for classification
-    # Split into batches for memory efficiency
-    batch_size = 32
+    # Larger batches for faster processing
+    batch_size = 64  # Increased from 32 for speed
     all_classified = []
     
     for batch_start in range(0, len(valid_detections), batch_size):
@@ -969,7 +990,8 @@ def validate_with_faster_rcnn_2batch(detections, image, faster_rcnn_model, conf_
                 continue
             
             crop = image.crop((x1, y1, x2, y2))
-            target_size = 224
+            # Smaller target size for faster processing
+            target_size = 160  # Reduced from 224
             crop_resized = crop.resize((target_size, target_size), Image.BILINEAR)
             crop_tensor = TF.to_tensor(crop_resized).to(device)
             
