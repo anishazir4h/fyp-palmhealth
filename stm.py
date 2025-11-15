@@ -674,7 +674,8 @@ def merge_tiled_detections(detections, image_size, iou_threshold=0.5):
     filtered_scores = scores[valid_indices]
     
     # Apply NMS with the provided threshold to remove duplicates
-    keep_indices = torch.ops.torchvision.nms(filtered_boxes, filtered_scores, iou_threshold)
+    from torchvision.ops import nms
+    keep_indices = nms(filtered_boxes, filtered_scores, iou_threshold)
     
     # Return kept detections
     final_indices = [valid_indices[i] for i in keep_indices]
