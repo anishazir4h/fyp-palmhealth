@@ -740,31 +740,43 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
     - Step 2: Faster R-CNN validates to confirm individual tree crowns (automatic, transparent)
     """
     
-    # Initialize progress tracking
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    try:
+        # Initialize progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Step 1: YOLO Detection (single pass, no tiling)
+        status_text.text("🔍 Step 1/2: Detecting palms with YOLO...")
+        progress_bar.progress(10)
+        
+        results = model.predict(
+            image,
+            conf=confidence_threshold,
+            iou=0.45,
+            max_det=300,
+            verbose=False
+        )
+    except Exception as e:
+        st.error(f"Error during YOLO detection: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return []
     
-    # Step 1: YOLO Detection (single pass, no tiling)
-    status_text.text("🔍 Step 1/2: Detecting palms with YOLO...")
-    progress_bar.progress(10)
-    
-    results = model.predict(
-        image,
-        conf=confidence_threshold,
-        iou=0.45,
-        max_det=300,
-        verbose=False
-    )
-    
-    progress_bar.progress(30)
+    try:
+        progress_bar.progress(30)
 
-    # Quick sanity
-    if not results or len(results) == 0 or results[0].boxes is None:
-        progress_bar.progress(100)
-        status_text.empty()
-        progress_bar.empty()
-        st.warning("⚠️ No palms detected. Try lowering the confidence threshold.")
-        return results
+        # Quick sanity
+        if not results or len(results) == 0 or results[0].boxes is None:
+            progress_bar.progress(100)
+            status_text.empty()
+            progress_bar.empty()
+            st.warning("⚠️ No palms detected. Try lowering the confidence threshold.")
+            return results
+    except Exception as e:
+        st.error(f"Error checking YOLO results: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return []
 
     # If YOLO produced very few detections but image looks dense, fall back to tile-based detection
     initial_count = len(results[0].boxes) if results[0].boxes is not None else 0
@@ -788,49 +800,75 @@ def auto_detect_palms(model, image, confidence_threshold=0.05, validation_model=
 
     # If tiling is selected, run tile-based detection then merge
     if use_tiling:
-        status_text.text("🔲 Using tile-based detection for dense plantation...")
-        progress_bar.progress(50)
-        
-        tiled = tile_based_detection(model, image, confidence_threshold=max(0.12, confidence_threshold), tile_size=416, overlap=0.25)
-        merged = merge_tiled_detections(tiled, image.size, iou_threshold=0.35)
+        try:
+            status_text.text("🔲 Using tile-based detection for dense plantation...")
+            progress_bar.progress(50)
+            
+            tiled = tile_based_detection(model, image, confidence_threshold=max(0.12, confidence_threshold), tile_size=416, overlap=0.25)
+            merged = merge_tiled_detections(tiled, image.size, iou_threshold=0.35)
 
-        # Convert merged to results-like structure
-        detections = merged
+            # Convert merged to results-like structure
+            detections = merged
+        except Exception as e:
+            st.error(f"Error during tiled detection: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            return []
     else:
-        # Convert YOLO results to detection list
-        status_text.text("📋 Processing YOLO detections...")
-        progress_bar.progress(50)
-        
-        boxes = results[0].boxes
-        detections = []
-        for i in range(len(boxes)):
-            bbox = boxes.xyxy[i].cpu().numpy()
-            detections.append({
-                'bbox': bbox,
-                'conf': float(boxes.conf[i]),
-                'cls': int(boxes.cls[i])
-            })
+        try:
+            # Convert YOLO results to detection list
+            status_text.text("📋 Processing YOLO detections...")
+            progress_bar.progress(50)
+            
+            boxes = results[0].boxes
+            detections = []
+            for i in range(len(boxes)):
+                bbox = boxes.xyxy[i].cpu().numpy()
+                detections.append({
+                    'bbox': bbox,
+                    'conf': float(boxes.conf[i]),
+                    'cls': int(boxes.cls[i])
+                })
+        except Exception as e:
+            st.error(f"Error processing YOLO boxes: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            return []
     
     progress_bar.progress(60)
 
     # If a validation model is provided, validate detections
     if validation_model is not None and detections:
-        status_text.text("✓ Step 2/2: Validating detections...")
-        progress_bar.progress(70)
-        
-        validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
-        detections = validated
-        
-        progress_bar.progress(85)
+        try:
+            status_text.text("✓ Step 2/2: Validating detections...")
+            progress_bar.progress(70)
+            
+            validated = validate_with_faster_rcnn_2batch(detections, image, validation_model)
+            detections = validated
+            
+            progress_bar.progress(85)
+        except Exception as e:
+            st.error(f"Error during validation: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            # Continue with unvalidated detections
+            progress_bar.progress(85)
     
     # MERGE OVERLAPPING BOXES - Remove boxes where 50%+ of area is covered by other boxes combined
     if detections and len(detections) > 1:
-        status_text.text("🔄 Removing duplicate detections...")
-        progress_bar.progress(90)
-        
-        before_merge = len(detections)
-        detections = merge_overlapping_boxes(detections, overlap_threshold=0.5)
-        after_merge = len(detections)
+        try:
+            status_text.text("🔄 Removing duplicate detections...")
+            progress_bar.progress(90)
+            
+            before_merge = len(detections)
+            detections = merge_overlapping_boxes(detections, overlap_threshold=0.5)
+            after_merge = len(detections)
+        except Exception as e:
+            st.error(f"Error merging overlapping boxes: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            # Continue with unmerged detections
+            progress_bar.progress(90)
     
     progress_bar.progress(100)
     status_text.empty()
